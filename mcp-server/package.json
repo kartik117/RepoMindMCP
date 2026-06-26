@@ -1,0 +1,26 @@
+{
+  "name": "repomind-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server exposing RepoMind's repo knowledge graph as tools for Claude Desktop / Cursor",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "repomind-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.1",
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  }
+}
