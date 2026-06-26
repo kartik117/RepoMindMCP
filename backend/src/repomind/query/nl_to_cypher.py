@@ -81,7 +81,16 @@ class NLToCypherChain:
         self._llm = llm or get_chat_model()
 
     async def ask(self, question: str) -> dict:
-        cypher = await self._generate_cypher(question)
+        try:
+            cypher = await self._generate_cypher(question)
+        except Exception as exc:  # noqa: BLE001 -- e.g. the LLM call itself rate-limited
+            return {
+                "question": question,
+                "cypher": None,
+                "results": [],
+                "error": str(exc),
+                "answer": f"Couldn't generate a query for that question: {exc}",
+            }
 
         if not _is_read_only(cypher):
             return {
@@ -110,5 +119,8 @@ class NLToCypherChain:
         if error:
             return f"The generated query failed to run: {error}"
         prompt = _ANSWER_PROMPT.format(question=question, results=results)
-        response = await self._llm.ainvoke(prompt)
+        try:
+            response = await self._llm.ainvoke(prompt)
+        except Exception as exc:  # noqa: BLE001 -- the query itself succeeded; degrade, don't crash
+            return f"Query succeeded but the answer couldn't be generated ({exc}). Raw results: {results}"
         return response.content

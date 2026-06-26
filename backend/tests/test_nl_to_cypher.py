@@ -19,6 +19,14 @@ class FakeLLM:
         return FakeResponse(self.response_text)
 
 
+class FailingLLM:
+    """Simulates the answer-synthesis call hitting a rate limit (or any
+    other failure) after the Cypher query itself already succeeded."""
+
+    async def ainvoke(self, prompt: str):
+        raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+
 async def test_ask_runs_generated_cypher_against_real_graph(graph_writer, neo4j_driver):
     parsed = ParsedFile(
         path="mod.py",
@@ -60,3 +68,40 @@ async def test_ask_handles_invalid_cypher_without_raising(graph_writer, neo4j_dr
 
     assert result["error"] is not None
     assert "failed to run" in result["answer"]
+
+
+async def test_ask_handles_cypher_generation_failure_without_raising(graph_writer, neo4j_driver):
+    # Same live-API smoke test, a different stage: with quota fully spent,
+    # generate_cypher itself raised before ask() ever reached the rest of
+    # the pipeline -- this was also unguarded.
+    async def failing_generate_cypher(question: str) -> str:
+        raise RuntimeError("429 RESOURCE_EXHAUSTED")
+
+    chain = NLToCypherChain(neo4j_driver, generate_cypher=failing_generate_cypher, llm=FakeLLM())
+    result = await chain.ask("what functions exist?")
+
+    assert result["cypher"] is None
+    assert result["error"] is not None
+    assert "Couldn't generate a query" in result["answer"]
+
+
+async def test_ask_degrades_gracefully_when_answer_synthesis_fails(graph_writer, neo4j_driver):
+    # Caught via a real live-API smoke test: a successful Cypher query
+    # followed by a rate-limited answer-synthesis call used to crash ask()
+    # entirely instead of returning the (still valid) raw results.
+    parsed = ParsedFile(
+        path="mod.py",
+        language="python",
+        functions=[ParsedFunction(name="helper", qualified_name="mod.helper", file_path="mod.py", line_number=1)],
+    )
+    graph_writer.write_structure([parsed])
+
+    async def fake_generate_cypher(question: str) -> str:
+        return "MATCH (fn:Function) RETURN fn.qualified_name AS qname"
+
+    chain = NLToCypherChain(neo4j_driver, generate_cypher=fake_generate_cypher, llm=FailingLLM())
+    result = await chain.ask("what functions exist?")
+
+    assert result["error"] is None
+    assert result["results"] == [{"qname": "mod.helper"}]
+    assert "mod.helper" in result["answer"]
