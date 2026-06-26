@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Node / TypeScript
+node_modules/
+dist/
+*.tsbuildinfo
+npm-debug.log*
+
+# Repos cloned for analysis, Neo4j data
+data/
+neo4j_data/
+*.db
+
+.DS_Store
+.vscode/
+.idea/
+.claude/
+.env
