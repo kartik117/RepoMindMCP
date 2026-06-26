@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from unittest.mock import patch
 
 from repomind.parsers.models import ParsedFunction, ParsedFile
 from repomind.query.nl_to_cypher import NLToCypherChain
@@ -105,3 +106,37 @@ async def test_ask_degrades_gracefully_when_answer_synthesis_fails(graph_writer,
     assert result["error"] is None
     assert result["results"] == [{"qname": "mod.helper"}]
     assert "mod.helper" in result["answer"]
+
+
+def test_construction_never_touches_the_real_llm_client(graph_writer, neo4j_driver):
+    # Caught by CI, not locally: api/main.py's lifespan constructs a chain
+    # at FastAPI startup with no llm override. get_chat_model() validates
+    # the Gemini API key immediately on construction, so if that used to
+    # happen eagerly in __init__, a backend with no key configured (true
+    # for CI, true for any contributor who hasn't set one up) would fail to
+    # start at all -- not just fail to answer a /query, fail to start.
+    with patch("repomind.query.nl_to_cypher.get_chat_model", side_effect=AssertionError("should not be called yet")):
+        NLToCypherChain(neo4j_driver)  # must not raise
+
+
+async def test_ask_degrades_when_llm_client_construction_itself_fails(graph_writer, neo4j_driver):
+    parsed = ParsedFile(
+        path="mod.py",
+        language="python",
+        functions=[ParsedFunction(name="helper", qualified_name="mod.helper", file_path="mod.py", line_number=1)],
+    )
+    graph_writer.write_structure([parsed])
+
+    async def fake_generate_cypher(question: str) -> str:
+        return "MATCH (fn:Function) RETURN fn.qualified_name AS qname"
+
+    with patch(
+        "repomind.query.nl_to_cypher.get_chat_model",
+        side_effect=ValueError("API key required for Gemini Developer API"),
+    ):
+        chain = NLToCypherChain(neo4j_driver, generate_cypher=fake_generate_cypher)
+        result = await chain.ask("what functions exist?")
+
+    assert result["error"] is None  # the query itself succeeded
+    assert result["results"] == [{"qname": "mod.helper"}]
+    assert "Raw results" in result["answer"]

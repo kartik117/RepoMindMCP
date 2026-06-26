@@ -78,7 +78,18 @@ class NLToCypherChain:
     ) -> None:
         self._driver = driver
         self._generate_cypher = generate_cypher
-        self._llm = llm or get_chat_model()
+        # Lazy, deliberately: constructing ChatGoogleGenerativeAI validates
+        # the API key immediately, and this constructor runs at FastAPI
+        # startup (see api/main.py's lifespan) -- a backend with no Gemini
+        # key configured would otherwise fail to start at all, rather than
+        # starting fine and degrading gracefully only if /query is actually
+        # called, which is what the try/except in _synthesize_answer is for.
+        self._llm = llm
+
+    def _get_llm(self):
+        if self._llm is None:
+            self._llm = get_chat_model()
+        return self._llm
 
     async def ask(self, question: str) -> dict:
         try:
@@ -120,7 +131,7 @@ class NLToCypherChain:
             return f"The generated query failed to run: {error}"
         prompt = _ANSWER_PROMPT.format(question=question, results=results)
         try:
-            response = await self._llm.ainvoke(prompt)
+            response = await self._get_llm().ainvoke(prompt)
         except Exception as exc:  # noqa: BLE001 -- the query itself succeeded; degrade, don't crash
             return f"Query succeeded but the answer couldn't be generated ({exc}). Raw results: {results}"
         return response.content
